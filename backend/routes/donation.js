@@ -1,5 +1,5 @@
 const router = require("express").Router();
-const Donation = require("../models/Donation");
+const Donation = require("../models/donation");
 
 router.post("/create", async (req, res) => {
   try {
