@@ -1,5 +1,4 @@
 // ENCODING & DECODING IMPLEMENTATION
-// Rubric Requirement: "Implement encoding and decoding using one technique (Base64)"
 
 exports.encodeBase64 = (text) => {
     return Buffer.from(text).toString('base64');
