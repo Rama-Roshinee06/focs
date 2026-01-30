@@ -15,3 +15,7 @@ exports.verifySignature = (data, signature) => {
   verify.update(data);
   return verify.verify(publicKey, signature, 'hex');
 };
+
+// EXPORT KEYS FOR KEY EXCHANGE MECHANISM
+exports.publicKey = publicKey.export({ type: 'pkcs1', format: 'pem' });
+exports.privateKey = privateKey;

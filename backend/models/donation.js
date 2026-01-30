@@ -5,6 +5,7 @@ const DonationSchema = new mongoose.Schema({
   amount: Number,
   purpose: String,
   status: String,
+  dataHash: String, // integrity check
   createdAt: {
     type: Date,
     default: Date.now
