@@ -42,6 +42,8 @@ router.post("/create", auth, acl(["donor", "admin"], "donation", "create"), asyn
   }
 });
 
+const ExpenseProof = require("../models/expenseProof");
+
 // Get My Donations - Protected
 router.get("/my-donations", auth, async (req, res) => {
   try {
@@ -49,15 +51,24 @@ router.get("/my-donations", auth, async (req, res) => {
     const user = await User.findById(req.user.id);
 
     // Fetch donations
-    const donations = await Donation.find({ donorEmail: user.email }).lean(); // Use lean() to modify result
+    const donations = await Donation.find({ donorEmail: user.email }).lean();
 
-    // Decrypt sensitive fields for the user
-    const decryptedDonations = donations.map(d => ({
-      ...d,
-      donorPhone: d.donorPhone ? decrypt(d.donorPhone) : d.donorPhone
-    }));
+    // Fetch proofs for these donations
+    // Using Promise.all to fetch proofs efficiently? Or just one query.
+    const donationIds = donations.map(d => d._id);
+    const proofs = await ExpenseProof.find({ donationId: { $in: donationIds } }).lean();
 
-    res.json(decryptedDonations);
+    // Attach proofs and decrypt
+    const result = donations.map(d => {
+      const proof = proofs.find(p => p.donationId.toString() === d._id.toString());
+      return {
+        ...d,
+        expenseProof: proof,
+        donorPhone: d.donorPhone ? decrypt(d.donorPhone) : d.donorPhone
+      };
+    });
+
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -75,7 +86,6 @@ router.get("/all", auth, acl(["admin", "staff"]), async (req, res) => {
   }
 });
 // Upload Expense Proof - Staff/Admin Only
-const ExpenseProof = require("../models/expenseProof");
 
 router.post("/upload-proof", auth, acl(["admin", "staff"]), async (req, res) => {
   try {

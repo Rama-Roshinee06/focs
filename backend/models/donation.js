@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const DonationSchema = new mongoose.Schema({
   donorEmail: String,
+  donorPhone: String, // Encrypted Field
   amount: Number,
   purpose: String,
   status: String,

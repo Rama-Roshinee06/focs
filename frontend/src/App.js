@@ -35,19 +35,30 @@ const API = {
   login: async (email, password) => {
     // Backend: POST /auth/login
     const res = await api.post('/auth/login', { email, password });
-    // Save token immediately
+    // Save token immediately if present (only if MFA is off, but here it is on)
     if (res.data.token) {
       localStorage.setItem('token', res.data.token);
     }
     return {
       success: true,
       message: res.data.message,
-      user: res.data.user,
+      token: res.data.token,
       role: res.data.role
     };
   },
 
-  // verifyLoginOTP removed/unused for standard login now
+  verifyLoginOTP: async (email, otp) => {
+    const res = await api.post('/auth/verify-otp', { email, otp });
+    if (res.data.token) {
+      localStorage.setItem('token', res.data.token);
+    }
+    return {
+      success: true,
+      message: res.data.message,
+      user: { email, role: res.data.role }, // Construct user object since backend only sends role/token
+      role: res.data.role
+    };
+  },
 
   // 3. DONATION
   createDonation: async (donorName, donorEmail, donorPhone, amount, purpose) => {
@@ -124,6 +135,19 @@ function App() {
   const [message, setMessage] = useState('');
   const [allDonations, setAllDonations] = useState([]);
 
+  // SAMPLE DONATION STATE
+  const [showSample, setShowSample] = useState(false);
+  const sampleDonation = {
+    id: "DON8821",
+    donorName: "John Doe",
+    amount: 2500,
+    purpose: "Education Support",
+    date: "2024-03-15",
+    status: "UTILIZED",
+    description: "Purchased notebooks, pens, and school bags for 10 children.",
+    receiptImage: "https://i.ibb.co/qF6V1Wp/sample-receipt.png" // Fallback if local image can't be served
+  };
+
   const addToCart = (item) => {
     setCart([...cart, { ...item, id: Date.now() }]);
     showMsg(`Added ${item.name} to cart!`);
@@ -176,17 +200,19 @@ function App() {
       const result = await API.login(email, password);
       showMsg(result.message);
 
-      // Direct Login (No OTP)
-      if (result.user) {
-        setCurrentUser(result.user);
-        setUserRole('donor');
-        setPage('products'); // Leading to products as requested initially, but can be dashboard
+      // Check if direct login succeeded (token present) or if OTP is required
+      if (result.token) {
+        setCurrentUser({ email, role: result.role }); // simplistic user obj
+        setUserRole(result.role);
+        setPage('products');
+      } else if (result.message.toLowerCase().includes('otp')) {
+        // Backend sent OTP
+        setAuthStep('loginOtp');
       } else {
-        // Fallback if backend didn't return user, though it should
-        showMsg("Login failed: invalid response");
+        showMsg("Login failed: Unexpected response");
       }
     } catch (err) {
-      showMsg(err.message);
+      showMsg(err.message || "Login failed");
     }
   };
 
@@ -194,11 +220,18 @@ function App() {
     try {
       const result = await API.verifyLoginOTP(email, otp);
       setCurrentUser(result.user);
-      setUserRole('donor');
+      const role = result.role || 'donor';
+      setUserRole(role);
       showMsg('Login successful!');
-      setPage('products');
+
+      if (role === 'staff' || role === 'admin') {
+        setPage('staff-dashboard');
+        loadAllDonations(); // Load data for staff
+      } else {
+        setPage('products');
+      }
     } catch (err) {
-      showMsg(err.message);
+      showMsg(err.message || "OTP Verification failed");
     }
   };
 
@@ -321,7 +354,7 @@ function App() {
               <button onClick={() => { setPage('login'); setUserRole('donor'); }} style={{ padding: '8px 16px', backgroundColor: '#ec4899', color: 'white', border: 'none', borderRadius: '20px', cursor: 'pointer' }}>
                 Donor Login
               </button>
-              <button onClick={() => { setPage('staff-login'); setUserRole('staff'); }} style={{ padding: '8px 16px', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '20px', cursor: 'pointer' }}>
+              <button onClick={() => { setPage('staff-login'); setAuthStep('login'); setEmail(''); setPassword(''); }} style={{ padding: '8px 16px', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '20px', cursor: 'pointer' }}>
                 Staff Login
               </button>
             </>
@@ -452,8 +485,146 @@ function App() {
                 Staff Access
               </button>
             </div>
+
+            {/* View Sample Donation Link */}
+            <div style={{ marginTop: '32px' }}>
+              <button
+                onClick={() => setShowSample(true)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#db2777',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  margin: '0 auto'
+                }}
+              >
+                🔍 View a Sample Verified Donation
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* Sample Donation Modal/Overlay */}
+        {showSample && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1000,
+            padding: '20px',
+            backdropFilter: 'blur(4px)'
+          }}>
+            <div style={{
+              backgroundColor: 'white',
+              borderRadius: '24px',
+              padding: '32px',
+              maxWidth: '600px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              position: 'relative',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+            }}>
+              <button
+                onClick={() => setShowSample(false)}
+                style={{
+                  position: 'absolute',
+                  top: '20px',
+                  right: '20px',
+                  background: '#f3f4f6',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '36px',
+                  height: '36px',
+                  cursor: 'pointer',
+                  fontSize: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                ✕
+              </button>
+
+              <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                <h2 style={{ fontSize: '28px', fontWeight: 'bold', color: '#111827' }}>Sample Verified Donation</h2>
+                <p style={{ color: '#6b7280' }}>This is how your donation appears after verification</p>
+              </div>
+
+              <div style={{ backgroundColor: '#fdf2f8', border: '1px solid #fce7f3', borderRadius: '16px', padding: '24px', marginBottom: '24px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div>
+                    <p style={{ fontSize: '12px', color: '#db2777', fontWeight: 'bold', textTransform: 'uppercase' }}>Donation ID</p>
+                    <p style={{ fontWeight: 'bold', fontSize: '16px' }}>{sampleDonation.id}</p>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <p style={{ fontSize: '12px', color: '#db2777', fontWeight: 'bold', textTransform: 'uppercase' }}>Amount</p>
+                    <p style={{ fontWeight: 'bold', fontSize: '24px', color: '#ec4899' }}>₹{sampleDonation.amount}</p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: '12px', color: '#db2777', fontWeight: 'bold', textTransform: 'uppercase' }}>Donor</p>
+                    <p style={{ fontWeight: 'bold', fontSize: '16px' }}>{sampleDonation.donorName}</p>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <p style={{ fontSize: '12px', color: '#db2777', fontWeight: 'bold', textTransform: 'uppercase' }}>Purpose</p>
+                    <p style={{ fontWeight: 'bold', fontSize: '16px' }}>{sampleDonation.purpose}</p>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px dashed #f9a8d4' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '14px', color: '#6b7280' }}>Date: {sampleDonation.date}</span>
+                    <span style={{
+                      padding: '4px 12px',
+                      backgroundColor: '#10b981',
+                      color: 'white',
+                      borderRadius: '20px',
+                      fontSize: '12px',
+                      fontWeight: 'bold'
+                    }}>
+                      {sampleDonation.status}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '12px', color: '#374151' }}>Expense Proof</h3>
+                <div style={{ border: '2px solid #e5e7eb', borderRadius: '16px', overflow: 'hidden' }}>
+                  <img
+                    src={sampleDonation.receiptImage}
+                    alt="Sample Receipt"
+                    style={{ width: '100%', height: 'auto', display: 'block' }}
+                  />
+                  <div style={{ padding: '16px', backgroundColor: '#f9fafb' }}>
+                    <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.5' }}>
+                      <strong>Utilization Details:</strong> {sampleDonation.description}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowSample(false)}
+                style={{ ...btnStyle, background: 'linear-gradient(to right, #ec4899, #f97316)' }}
+              >
+                Got it, thanks!
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Process Explanation Section */}
         <div style={{ padding: '80px 20px', backgroundColor: 'white' }}>
@@ -677,15 +848,52 @@ function App() {
               <p style={{ color: '#6b7280', fontSize: '14px' }}>Orphanage staff access</p>
             </div>
 
-            <input type="text" placeholder="Staff ID" style={inputStyle} />
-            <input type="password" placeholder="Password" style={inputStyle} />
+            {message && (
+              <div style={{ padding: '12px', marginBottom: '16px', backgroundColor: message.includes('success') || message.includes('sent') ? '#d1fae5' : '#fee2e2', color: message.includes('success') || message.includes('sent') ? '#065f46' : '#991b1b', borderRadius: '8px', fontSize: '14px' }}>
+                {message}
+              </div>
+            )}
 
-            <button
-              onClick={() => { setUserRole('staff'); setPage('staff-dashboard'); loadAllDonations(); }}
-              style={{ ...btnStyle, background: 'linear-gradient(to right, #6366f1, #8b5cf6)' }}
-            >
-              Login (Demo)
-            </button>
+            {authStep !== 'loginOtp' && (
+              <>
+                <input
+                  type="email"
+                  placeholder="Staff ID (Email)"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  style={inputStyle}
+                />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  style={inputStyle}
+                />
+                <button
+                  onClick={handleLogin}
+                  style={{ ...btnStyle, background: 'linear-gradient(to right, #6366f1, #8b5cf6)' }}
+                >
+                  Login
+                </button>
+              </>
+            )}
+
+            {authStep === 'loginOtp' && (
+              <>
+                <input
+                  type="text"
+                  placeholder="Enter 6-digit OTP"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  style={inputStyle}
+                  maxLength={6}
+                />
+                <button onClick={handleVerifyLogin} style={{ ...btnStyle, background: 'linear-gradient(to right, #6366f1, #8b5cf6)' }}>
+                  Verify OTP & Access
+                </button>
+              </>
+            )}
 
             <button onClick={() => setPage('home')} style={{ ...btnStyle, background: 'transparent', color: '#6b7280', marginTop: '12px' }}>
               ← Back to Home
