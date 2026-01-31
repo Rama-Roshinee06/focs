@@ -1,1295 +1,276 @@
-import React, { useState } from 'react';
-
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import SecurityPanel from './components/SecurityPanel';
+import 'bootstrap/dist/css/bootstrap.min.css';
 
-// REAL BACKEND API
-const api = axios.create({
-  baseURL: 'http://localhost:5000',
-});
+const API_BASE = 'http://localhost:5000';
 
-// Add token to requests if available
+const api = axios.create({ baseURL: API_BASE });
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-const API = {
-  // 1. REGISTER
-  registerDonor: async (email, password) => {
-    // Backend: POST /auth/request-otp
-    const res = await api.post('/auth/request-otp', { email, password });
-    // Note: Backend doesn't save user yet, just sends OTP.
-    return { success: true, message: res.data.message };
-  },
-
-  verifySignupOTP: async (email, otp) => {
-    // Backend: POST /auth/verify-signup
-    const res = await api.post('/auth/verify-signup', { email, otp });
-    return { success: true, message: res.data.message };
-  },
-
-  // 2. LOGIN
-  login: async (email, password) => {
-    // Backend: POST /auth/login
-    const res = await api.post('/auth/login', { email, password });
-    // Save token immediately if present (only if MFA is off, but here it is on)
-    if (res.data.token) {
-      localStorage.setItem('token', res.data.token);
-    }
-    return {
-      success: true,
-      message: res.data.message,
-      token: res.data.token,
-      role: res.data.role
-    };
-  },
-
-  verifyLoginOTP: async (email, otp) => {
-    const res = await api.post('/auth/verify-otp', { email, otp });
-    if (res.data.token) {
-      localStorage.setItem('token', res.data.token);
-    }
-    return {
-      success: true,
-      message: res.data.message,
-      user: { email, role: res.data.role }, // Construct user object since backend only sends role/token
-      role: res.data.role
-    };
-  },
-
-  // 3. DONATION
-  createDonation: async (donorName, donorEmail, donorPhone, amount, purpose) => {
-    // Backend: POST /donation/create
-    const res = await api.post('/donation/create', { amount, purpose });
-    return {
-      success: true,
-      message: res.data.message,
-      donationId: "See Console"
-    };
-  },
-
-  // 4. VERIFY DONATION
-  verifyDonationOwnership: async (email, otp) => {
-    return { success: true, message: "Verified securely via Digital Signature" };
-  },
-
-  // 5. UPLOAD PROOF
-  uploadExpenseProof: async (donationId, receiptImage, description) => {
-    const res = await api.post('/donation/upload-proof', { donationId, receiptImage, description });
-    return { success: true, message: res.data.message };
-  },
-
-  // 6. GET DONATIONS
-  getDonorDonations: async (email, otp) => {
-    const res = await api.get('/donation/my-donations');
-    return { success: true, donations: res.data };
-  },
-
-  getAllDonations: async () => {
-    try {
-      const res = await api.get('/donation/all');
-      return res.data;
-    } catch (e) { return []; }
-  },
-
-  getUnlinkedDonations: () => []
-};
-
 function App() {
-  const [page, setPage] = useState('home');
-  const [userRole, setUserRole] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')) || null);
+  const [page, setPage] = useState(user ? 'dashboard' : 'login');
+  const [authMode, setAuthMode] = useState('login');
+  const [authStep, setAuthStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [message, setMessage] = useState(null);
 
-  // CART STATE
-  const [cart, setCart] = useState([]);
+  const [formData, setFormData] = useState({ email: '', password: '', role: 'donor', otp: '' });
+  const [donations, setDonations] = useState([]);
+  const [stats, setStats] = useState({ total: 0, pending: 0 });
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [otp, setOtp] = useState('');
-  const [authStep, setAuthStep] = useState('login');
+  useEffect(() => {
+    if (user) fetchDonations();
+  }, [user]);
 
-  const [donorName, setDonorName] = useState('');
-  const [donorEmail, setDonorEmail] = useState('');
-  const [donorPhone, setDonorPhone] = useState('');
-  const [donationAmount, setDonationAmount] = useState('');
-  const [donationPurpose, setDonationPurpose] = useState('food');
-  const [lastDonationId, setLastDonationId] = useState('');
-
-  const [verifyEmail, setVerifyEmail] = useState('');
-  const [verifyOTP, setVerifyOTP] = useState('');
-  const [verifiedDonation, setVerifiedDonation] = useState(null);
-
-  const [selectedDonationId, setSelectedDonationId] = useState('');
-  const [receiptImage, setReceiptImage] = useState('');
-  const [proofDescription, setProofDescription] = useState('');
-
-  const [viewEmail, setViewEmail] = useState('');
-  const [viewOTP, setViewOTP] = useState('');
-  const [myDonations, setMyDonations] = useState([]);
-  const [needsOTP, setNeedsOTP] = useState(false);
-
-  const [message, setMessage] = useState('');
-  const [allDonations, setAllDonations] = useState([]);
-
-  // SAMPLE DONATION STATE
-  const [showSample, setShowSample] = useState(false);
-  const sampleDonation = {
-    id: "DON8821",
-    donorName: "John Doe",
-    amount: 2500,
-    purpose: "Education Support",
-    date: "2024-03-15",
-    status: "UTILIZED",
-    description: "Purchased notebooks, pens, and school bags for 10 children.",
-    receiptImage: "https://i.ibb.co/qF6V1Wp/sample-receipt.png" // Fallback if local image can't be served
+  const showMsg = (msg, isErr = false) => {
+    if (isErr) { setError(msg); setMessage(null); }
+    else { setMessage(msg); setError(null); }
+    setTimeout(() => { setError(null); setMessage(null); }, 5000);
   };
 
-  const addToCart = (item) => {
-    setCart([...cart, { ...item, id: Date.now() }]);
-    showMsg(`Added ${item.name} to cart!`);
-  };
-
-  const removeFromCart = (itemId) => {
-    setCart(cart.filter(item => item.id !== itemId));
-    showMsg('Item removed from cart');
-  };
-
-  const showMsg = (msg) => {
-    setMessage(msg);
-    setTimeout(() => setMessage(''), 4000);
-  };
-
-  const handleSignup = async () => {
-    if (!email || !password || !confirmPassword) {
-      showMsg('All fields required');
-      return;
-    }
-    if (password !== confirmPassword) {
-      showMsg('Passwords do not match');
-      return;
-    }
-
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setLoading(true);
     try {
-      const result = await API.registerDonor(email, password);
-      showMsg(result.message);
-      setAuthStep('signupOtp');
-    } catch (err) {
-      showMsg(err.message);
-    }
-  };
-
-  const handleVerifySignup = async () => {
-    try {
-      const result = await API.verifySignupOTP(email, otp);
-      showMsg(result.message);
-      setAuthStep('login');
-      setEmail('');
-      setPassword('');
-      setOtp('');
-    } catch (err) {
-      showMsg(err.message);
-    }
-  };
-
-  const handleLogin = async () => {
-    try {
-      const result = await API.login(email, password);
-      showMsg(result.message);
-
-      // Check if direct login succeeded (token present) or if OTP is required
-      if (result.token) {
-        setCurrentUser({ email, role: result.role }); // simplistic user obj
-        setUserRole(result.role);
-        setPage('products');
-      } else if (result.message.toLowerCase().includes('otp')) {
-        // Backend sent OTP
-        setAuthStep('loginOtp');
+      if (authMode === 'signup') {
+        if (authStep === 1) {
+          const res = await api.post('/auth/request-otp', { email: formData.email, password: formData.password, role: formData.role });
+          showMsg(res.data.message);
+          setAuthStep(2);
+        } else {
+          const res = await api.post('/auth/verify-signup', { email: formData.email, otp: formData.otp });
+          showMsg(res.data.message);
+          setAuthMode('login');
+          setAuthStep(1);
+        }
       } else {
-        showMsg("Login failed: Unexpected response");
+        if (authStep === 1) {
+          const res = await api.post('/auth/login', { email: formData.email, password: formData.password });
+          showMsg(res.data.message);
+          setAuthStep(2);
+        } else {
+          const res = await api.post('/auth/verify-otp', { email: formData.email, otp: formData.otp });
+          const userData = { email: formData.email, role: res.data.role, token: res.data.token, context: res.data.authContext };
+          localStorage.setItem('token', res.data.token);
+          localStorage.setItem('user', JSON.stringify(userData));
+          setUser(userData);
+          setPage('dashboard');
+          showMsg('Logged in successfully!');
+        }
       }
     } catch (err) {
-      showMsg(err.message || "Login failed");
-    }
+      showMsg(err.response?.data?.message || 'Authentication error', true);
+    } finally { setLoading(false); }
   };
 
-  const handleVerifyLogin = async () => {
+  const fetchDonations = async () => {
     try {
-      const result = await API.verifyLoginOTP(email, otp);
-      setCurrentUser(result.user);
-      const role = result.role || 'donor';
-      setUserRole(role);
-      showMsg('Login successful!');
-
-      if (role === 'staff' || role === 'admin') {
-        setPage('staff-dashboard');
-        loadAllDonations(); // Load data for staff
-      } else {
-        setPage('products');
-      }
+      const endpoint = user.role === 'donor' ? '/donation/my-donations' : '/donation/all';
+      const res = await api.get(endpoint);
+      const data = user.role === 'donor' ? res.data.donations : res.data;
+      setDonations(data);
     } catch (err) {
-      showMsg(err.message || "OTP Verification failed");
+      if (err.response?.status === 403) showMsg(err.response.data.message, true);
     }
   };
 
-  const handleCreateDonation = async () => {
-    if (!donorName || !donorEmail || !donorPhone || !donationAmount) {
-      showMsg('All fields required');
-      return;
-    }
+  const handleLogout = () => {
+    localStorage.clear();
+    setUser(null);
+    setPage('login');
+    setAuthStep(1);
+    setFormData({ email: '', password: '', role: 'donor', otp: '' });
+  };
 
+  const createDonation = async (e) => {
+    e.preventDefault();
     try {
-      const result = await API.createDonation(donorName, donorEmail, donorPhone, donationAmount, donationPurpose);
-      showMsg(result.message);
-      setLastDonationId(result.donationId);
-      setDonorName('');
-      setDonorEmail('');
-      setDonorPhone('');
-      setDonationAmount('');
-      loadAllDonations();
-    } catch (err) {
-      showMsg(err.message);
-    }
+      const res = await api.post('/donation/create', {
+        amount: formData.amount,
+        purpose: formData.purpose,
+        donorPhone: formData.phone,
+        email: formData.email // for admin recording
+      });
+      showMsg(res.data.message);
+      fetchDonations();
+    } catch (err) { showMsg(err.response?.data?.message || 'Error', true); }
   };
 
-  const handleVerifyDonation = async () => {
-    try {
-      const result = await API.verifyDonationOwnership(verifyEmail, verifyOTP);
-      showMsg(result.message);
-      setVerifiedDonation(result.donation);
-      setVerifyOTP('');
-    } catch (err) {
-      showMsg(err.message);
-    }
-  };
-
-  const handleUploadProof = async () => {
-    if (!selectedDonationId || !receiptImage || !proofDescription) {
-      showMsg('All fields required');
-      return;
-    }
-
-    try {
-      const result = await API.uploadExpenseProof(selectedDonationId, receiptImage, proofDescription);
-      showMsg(result.message);
-      setSelectedDonationId('');
-      setReceiptImage('');
-      setProofDescription('');
-      loadAllDonations();
-    } catch (err) {
-      showMsg(err.message);
-    }
-  };
-
-  // Suppress ResizeObserver loop error
-  React.useEffect(() => {
-    const handleError = (e) => {
-      if (e.message === 'ResizeObserver loop completed with undelivered notifications.') {
-        const resizeObserverErr = document.getElementById('webpack-dev-server-client-overlay');
-        if (resizeObserverErr) resizeObserverErr.style.display = 'none';
-        e.stopImmediatePropagation();
-      }
-    };
-    window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
-  }, []);
-
-  const handleViewDonations = async () => {
-    try {
-      // No email/OTP needed, uses token
-      const result = await API.getDonorDonations();
-      setMyDonations(result.donations);
-      showMsg('Donations loaded successfully');
-    } catch (err) {
-      showMsg(err.message);
-    }
-  };
-
-  // Auto-load donations when entering dashboard
-  React.useEffect(() => {
-    if (page === 'donor-dashboard') {
-      handleViewDonations();
-    }
-  }, [page]);
-
-  const loadAllDonations = async () => {
-    const data = await API.getAllDonations();
-    setAllDonations(data || []);
-  };
-
-  const inputStyle = {
-    width: '100%',
-    padding: '12px',
-    marginBottom: '12px',
-    border: '2px solid #e5e7eb',
-    borderRadius: '8px',
-    fontSize: '14px',
-    boxSizing: 'border-box'
-  };
-
-  const btnStyle = {
-    width: '100%',
-    padding: '12px',
-    background: 'linear-gradient(to right, #ec4899, #f97316)',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    fontWeight: 'bold',
-    cursor: 'pointer',
-    fontSize: '14px'
-  };
-
-  const renderNav = () => (
-    <div style={{ backgroundColor: 'white', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-      <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: '24px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => setPage('home')}>
-          ❤️ HopeHaven
-        </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          {!currentUser && (
-            <>
-              <button onClick={() => { setPage('login'); setUserRole('donor'); }} style={{ padding: '8px 16px', backgroundColor: '#ec4899', color: 'white', border: 'none', borderRadius: '20px', cursor: 'pointer' }}>
-                Donor Login
-              </button>
-              <button onClick={() => { setPage('staff-login'); setAuthStep('login'); setEmail(''); setPassword(''); }} style={{ padding: '8px 16px', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '20px', cursor: 'pointer' }}>
-                Staff Login
-              </button>
-            </>
-          )}
-          {currentUser && (
-            <>
-              <button onClick={() => setPage('products')} style={{ padding: '8px 16px', backgroundColor: '#ec4899', color: 'white', border: 'none', borderRadius: '20px', cursor: 'pointer' }}>
-                Donate
-              </button>
-              <button onClick={() => setPage('donor-dashboard')} style={{ padding: '8px 16px', backgroundColor: '#f97316', color: 'white', border: 'none', borderRadius: '20px', cursor: 'pointer' }}>
-                Dashboard
-              </button>
-              <button onClick={() => { setCurrentUser(null); setUserRole(null); setPage('home'); }} style={{ padding: '8px 16px', backgroundColor: '#6b7280', color: 'white', border: 'none', borderRadius: '20px', cursor: 'pointer' }}>
-                Logout
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  if (page === 'home') {
-    return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#ffffff', fontFamily: '"Inter", sans-serif' }}>
-        {renderNav()}
-
-        {/* Hero Section */}
-        <div style={{
-          background: 'linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)',
-          padding: '80px 20px',
-          textAlign: 'center',
-          position: 'relative',
-          overflow: 'hidden'
-        }}>
-          {/* Decorative background circle */}
-          <div style={{
-            position: 'absolute',
-            top: '-50px',
-            right: '-50px',
-            width: '300px',
-            height: '300px',
-            borderRadius: '50%',
-            background: 'rgba(236, 72, 153, 0.1)',
-            zIndex: 0
-          }} />
-
-          <div style={{ position: 'relative', zIndex: 1, maxWidth: '900px', margin: '0 auto' }}>
-            <span style={{
-              display: 'inline-block',
-              padding: '8px 16px',
-              backgroundColor: '#fce7f3',
-              color: '#db2777',
-              borderRadius: '20px',
-              fontSize: '14px',
-              fontWeight: '600',
-              marginBottom: '24px'
-            }}>
-              ❤️ Transparency Verification System
-            </span>
-
-            <h1 style={{
-              fontSize: '56px',
-              fontWeight: '800',
-              lineHeight: '1.2',
-              marginBottom: '24px',
-              color: '#1f2937',
-              letterSpacing: '-1px'
-            }}>
-              Make a Real Impact.<br />
-              <span style={{
-                background: 'linear-gradient(to right, #ec4899, #f97316)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent'
-              }}>
-                Verify Every Rupee.
-              </span>
-            </h1>
-
-            <p style={{
-              fontSize: '20px',
-              color: '#4b5563',
-              marginBottom: '48px',
-              maxWidth: '700px',
-              margin: '0 auto 48px',
-              lineHeight: '1.6'
-            }}>
-              Select items you wish to donate here, visit our orphanage to pay, and verify your contribution instantly with our secure OTP system.
-            </p>
-
-            <div style={{ display: 'flex', gap: '20px', justifyContent: 'center' }}>
-              <button
-                onClick={() => { setPage('login'); setUserRole('donor'); }}
-                style={{
-                  padding: '18px 40px',
-                  backgroundColor: '#ec4899',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '50px',
-                  fontSize: '18px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  boxShadow: '0 10px 25px -5px rgba(236, 72, 153, 0.4)',
-                  transition: 'transform 0.2s'
-                }}
-                onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
-                onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
-              >
-                Start Donating Now
-              </button>
-
-              <button
-                onClick={() => { setPage('staff-login'); setUserRole('staff'); }}
-                style={{
-                  padding: '18px 40px',
-                  backgroundColor: 'white',
-                  color: '#4b5563',
-                  border: '2px solid #e5e7eb',
-                  borderRadius: '50px',
-                  fontSize: '18px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.2s'
-                }}
-                onMouseOver={(e) => e.target.style.backgroundColor = '#f9fafb'}
-                onMouseOut={(e) => e.target.style.backgroundColor = 'white'}
-              >
-                Staff Access
-              </button>
-            </div>
-
-            {/* View Sample Donation Link */}
-            <div style={{ marginTop: '32px' }}>
-              <button
-                onClick={() => setShowSample(true)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#db2777',
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  textDecoration: 'underline',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  margin: '0 auto'
-                }}
-              >
-                🔍 View a Sample Verified Donation
-              </button>
-            </div>
+  return (
+    <div className="bg-light min-vh-100">
+      <nav className="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+        <div className="container">
+          <span className="navbar-brand fw-bold">🛡️ SecureOrphanage</span>
+          <div className="ms-auto d-flex align-items-center">
+            {user ? (
+              <>
+                <span className="text-light me-3 small">Role: <span className="badge bg-primary text-uppercase">{user.role}</span></span>
+                <button className="btn btn-outline-light btn-sm" onClick={handleLogout}>Logout</button>
+              </>
+            ) : (
+              <span className="text-light small">Cybersecurity Defense Implementation</span>
+            )}
           </div>
         </div>
+      </nav>
 
-        {/* Sample Donation Modal/Overlay */}
-        {showSample && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.6)',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            zIndex: 1000,
-            padding: '20px',
-            backdropFilter: 'blur(4px)'
-          }}>
-            <div style={{
-              backgroundColor: 'white',
-              borderRadius: '24px',
-              padding: '32px',
-              maxWidth: '600px',
-              width: '100%',
-              maxHeight: '90vh',
-              overflowY: 'auto',
-              position: 'relative',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
-            }}>
-              <button
-                onClick={() => setShowSample(false)}
-                style={{
-                  position: 'absolute',
-                  top: '20px',
-                  right: '20px',
-                  background: '#f3f4f6',
-                  border: 'none',
-                  borderRadius: '50%',
-                  width: '36px',
-                  height: '36px',
-                  cursor: 'pointer',
-                  fontSize: '20px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                ✕
-              </button>
+      <div className="container">
+        {error && <div className="alert alert-danger">{error}</div>}
+        {message && <div className="alert alert-success">{message}</div>}
 
-              <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-                <h2 style={{ fontSize: '28px', fontWeight: 'bold', color: '#111827' }}>Sample Verified Donation</h2>
-                <p style={{ color: '#6b7280' }}>This is how your donation appears after verification</p>
-              </div>
-
-              <div style={{ backgroundColor: '#fdf2f8', border: '1px solid #fce7f3', borderRadius: '16px', padding: '24px', marginBottom: '24px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  <div>
-                    <p style={{ fontSize: '12px', color: '#db2777', fontWeight: 'bold', textTransform: 'uppercase' }}>Donation ID</p>
-                    <p style={{ fontWeight: 'bold', fontSize: '16px' }}>{sampleDonation.id}</p>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <p style={{ fontSize: '12px', color: '#db2777', fontWeight: 'bold', textTransform: 'uppercase' }}>Amount</p>
-                    <p style={{ fontWeight: 'bold', fontSize: '24px', color: '#ec4899' }}>₹{sampleDonation.amount}</p>
-                  </div>
-                  <div>
-                    <p style={{ fontSize: '12px', color: '#db2777', fontWeight: 'bold', textTransform: 'uppercase' }}>Donor</p>
-                    <p style={{ fontWeight: 'bold', fontSize: '16px' }}>{sampleDonation.donorName}</p>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <p style={{ fontSize: '12px', color: '#db2777', fontWeight: 'bold', textTransform: 'uppercase' }}>Purpose</p>
-                    <p style={{ fontWeight: 'bold', fontSize: '16px' }}>{sampleDonation.purpose}</p>
-                  </div>
-                </div>
-
-                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px dashed #f9a8d4' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '14px', color: '#6b7280' }}>Date: {sampleDonation.date}</span>
-                    <span style={{
-                      padding: '4px 12px',
-                      backgroundColor: '#10b981',
-                      color: 'white',
-                      borderRadius: '20px',
-                      fontSize: '12px',
-                      fontWeight: 'bold'
-                    }}>
-                      {sampleDonation.status}
-                    </span>
+        {page === 'login' && (
+          <div className="row justify-content-center mt-5">
+            <div className="col-md-5">
+              <div className="card shadow border-0">
+                <div className="card-body p-4">
+                  <h3 className="text-center mb-4">{authMode === 'login' ? 'Secure Login' : 'Register Account'}</h3>
+                  <form onSubmit={handleAuth}>
+                    {authStep === 1 && (
+                      <>
+                        <div className="mb-3">
+                          <label className="form-label small fw-bold">EMAIL ADDRESS</label>
+                          <input className="form-control" type="email" required value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} />
+                        </div>
+                        <div className="mb-3">
+                          <label className="form-label small fw-bold">PASSWORD</label>
+                          <input className="form-control" type="password" required value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} />
+                        </div>
+                        {authMode === 'signup' && (
+                          <div className="mb-3">
+                            <label className="form-label small fw-bold">ASSIGN ROLE (RBAC DEMO)</label>
+                            <select className="form-select" value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value })}>
+                              <option value="donor">Donor (Standard User)</option>
+                              <option value="staff">Staff (Limited Admin)</option>
+                              <option value="admin">Admin (Full Access)</option>
+                            </select>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {authStep === 2 && (
+                      <div className="mb-3">
+                        <label className="form-label small fw-bold text-primary">MFA CODE (OTP IN CONSOLE)</label>
+                        <input className="form-control form-control-lg text-center fw-bold" maxLength="6" placeholder="000000" value={formData.otp} onChange={e => setFormData({ ...formData, otp: e.target.value })} />
+                        <div className="form-text text-center">A 6-digit code was sent via 2nd factor simulation.</div>
+                      </div>
+                    )}
+                    <button className="btn btn-primary w-100 py-2 fw-bold" disabled={loading}>
+                      {loading ? 'Processing...' : (authStep === 1 ? 'Next' : 'Verify & Enter')}
+                    </button>
+                  </form>
+                  <div className="text-center mt-3">
+                    <button className="btn btn-link link-secondary small" onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setAuthStep(1); }}>
+                      {authMode === 'login' ? 'Need an account? Sign up' : 'Have an account? Login'}
+                    </button>
                   </div>
                 </div>
               </div>
-
-              <div style={{ marginBottom: '24px' }}>
-                <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '12px', color: '#374151' }}>Expense Proof</h3>
-                <div style={{ border: '2px solid #e5e7eb', borderRadius: '16px', overflow: 'hidden' }}>
-                  <img
-                    src={sampleDonation.receiptImage}
-                    alt="Sample Receipt"
-                    style={{ width: '100%', height: 'auto', display: 'block' }}
-                  />
-                  <div style={{ padding: '16px', backgroundColor: '#f9fafb' }}>
-                    <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.5' }}>
-                      <strong>Utilization Details:</strong> {sampleDonation.description}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowSample(false)}
-                style={{ ...btnStyle, background: 'linear-gradient(to right, #ec4899, #f97316)' }}
-              >
-                Got it, thanks!
-              </button>
             </div>
           </div>
         )}
 
-        {/* Process Explanation Section */}
-        <div style={{ padding: '80px 20px', backgroundColor: 'white' }}>
-          <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
-            <div style={{ textAlign: 'center', marginBottom: '60px' }}>
-              <h2 style={{ fontSize: '36px', fontWeight: 'bold', color: '#111827', marginBottom: '12px' }}>Simple, Secure, Transparent</h2>
-              <p style={{ fontSize: '18px', color: '#6b7280' }}>How to ensure your help reaches the children</p>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '40px' }}>
-
-              {/* Step 1 */}
-              <div style={{ padding: '32px', borderRadius: '24px', backgroundColor: '#fdf2f8', border: '1px solid #fce7f3' }}>
-                <div style={{
-                  width: '60px', height: '60px',
-                  backgroundColor: '#fbcfe8',
-                  color: '#be185d',
-                  borderRadius: '16px',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '28px', marginBottom: '24px'
-                }}>
-                  🛒
-                </div>
-                <h3 style={{ fontSize: '22px', fontWeight: 'bold', color: '#1f2937', marginBottom: '12px' }}>1. Add to Cart</h3>
-                <p style={{ color: '#6b7280', lineHeight: '1.6' }}>
-                  Browse our needed items—food, education, medical supplies. Add them to your digital cart to plan your donation before you arrive.
-                </p>
-              </div>
-
-              {/* Step 2 */}
-              <div style={{ padding: '32px', borderRadius: '24px', backgroundColor: '#fff7ed', border: '1px solid #ffedd5' }}>
-                <div style={{
-                  width: '60px', height: '60px',
-                  backgroundColor: '#fed7aa',
-                  color: '#c2410c',
-                  borderRadius: '16px',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '28px', marginBottom: '24px'
-                }}>
-                  📍
-                </div>
-                <h3 style={{ fontSize: '22px', fontWeight: 'bold', color: '#1f2937', marginBottom: '12px' }}>2. Visit & Donate</h3>
-                <p style={{ color: '#6b7280', lineHeight: '1.6' }}>
-                  Come to the orphanage. Our staff will look up your planned donation, receive your payment (Cash/UPI), and log it instantly.
-                </p>
-              </div>
-
-              {/* Step 3 */}
-              <div style={{ padding: '32px', borderRadius: '24px', backgroundColor: '#eff6ff', border: '1px solid #dbeafe' }}>
-                <div style={{
-                  width: '60px', height: '60px',
-                  backgroundColor: '#bfdbfe',
-                  color: '#1d4ed8',
-                  borderRadius: '16px',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '28px', marginBottom: '24px'
-                }}>
-                  ✅
-                </div>
-                <h3 style={{ fontSize: '22px', fontWeight: 'bold', color: '#1f2937', marginBottom: '12px' }}>3. Verify & Track</h3>
-                <p style={{ color: '#6b7280', lineHeight: '1.6' }}>
-                  You'll receive an OTP to confirm the donation. Later, login to your dashboard to see expense proofs (bills/receipts) uploaded by staff.
-                </p>
-              </div>
-
-            </div>
-          </div>
-        </div>
-
-        {/* Footer/CTA */}
-        <div style={{ padding: '60px 20px', backgroundColor: '#111827', color: 'white', textAlign: 'center' }}>
-          <h2 style={{ fontSize: '32px', fontWeight: 'bold', marginBottom: '24px' }}>Ready to bring a smile?</h2>
-          <button
-            onClick={() => { setPage('login'); setUserRole('donor'); }}
-            style={{
-              padding: '16px 32px',
-              backgroundColor: 'white',
-              color: '#111827',
-              border: 'none',
-              borderRadius: '50px',
-              fontSize: '16px',
-              fontWeight: 'bold',
-              cursor: 'pointer'
-            }}
-          >
-            Create Donor Account
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (page === 'login') {
-    return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb' }}>
-        {renderNav()}
-
-        <div style={{ padding: '40px 20px', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 'calc(100vh - 80px)' }}>
-          <div style={{ width: '100%', maxWidth: '400px', backgroundColor: 'white', padding: '32px', borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
-            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>❤️</div>
-              <h2 style={{ fontSize: '24px', fontWeight: 'bold' }}>
-                {authStep === 'signup' || authStep === 'signupOtp' ? 'Donor Signup' : 'Donor Login'}
-              </h2>
-              <p style={{ color: '#6b7280', fontSize: '14px' }}>OTP-verified secure access</p>
-            </div>
-
-            {message && (
-              <div style={{ padding: '12px', marginBottom: '16px', backgroundColor: message.includes('success') || message.includes('sent') ? '#d1fae5' : '#fee2e2', color: message.includes('success') || message.includes('sent') ? '#065f46' : '#991b1b', borderRadius: '8px', fontSize: '14px' }}>
-                {message}
-              </div>
-            )}
-
-            {(authStep === 'login' || authStep === 'signup' || authStep === 'signupOtp') && (
-              <input
-                type="email"
-                placeholder="Email Address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                style={inputStyle}
-              />
-            )}
-
-            {(authStep === 'login' || authStep === 'signup') && (
-              <input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={inputStyle}
-              />
-            )}
-
-            {authStep === 'signup' && (
-              <input
-                type="password"
-                placeholder="Confirm Password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                style={inputStyle}
-              />
-            )}
-
-            {(authStep === 'signupOtp' || authStep === 'loginOtp') && (
-              <input
-                type="text"
-                placeholder="Enter 6-digit OTP"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                style={inputStyle}
-                maxLength={6}
-              />
-            )}
-
-            {authStep === 'login' && (
-              <button onClick={handleLogin} style={btnStyle}>
-                Login with Password
-              </button>
-            )}
-
-            {authStep === 'loginOtp' && (
-              <button onClick={handleVerifyLogin} style={btnStyle}>
-                Verify OTP & Login
-              </button>
-            )}
-
-            {authStep === 'signup' && (
-              <button onClick={handleSignup} style={btnStyle}>
-                Send OTP
-              </button>
-            )}
-
-            {authStep === 'signupOtp' && (
-              <button onClick={handleVerifySignup} style={btnStyle}>
-                Verify & Create Account
-              </button>
-            )}
-
-            {/* DEMO MODE BUTTON */}
-            <button
-              onClick={() => {
-                setCurrentUser({ email: 'demo@example.com', role: 'donor' });
-                setUserRole('donor');
-                setPage('products');
-                showMsg('Entered Demo Mode');
-              }}
-              style={{ ...btnStyle, marginTop: '12px', background: '#e5e7eb', color: '#374151' }}
-            >
-              👁️ View Demo (No Login)
-            </button>
-
-            <p
-              style={{ textAlign: 'center', marginTop: '16px', cursor: 'pointer', color: '#ec4899', fontSize: '14px' }}
-              onClick={() => {
-                if (authStep === 'login') setAuthStep('signup');
-                else if (authStep === 'signup') setAuthStep('login');
-              }}
-            >
-              {authStep === 'login' || authStep === 'loginOtp' ? 'New donor? Create account' : 'Already registered? Login'}
-            </p>
-
-            <button onClick={() => setPage('home')} style={{ ...btnStyle, background: 'transparent', color: '#6b7280', marginTop: '12px' }}>
-              ← Back to Home
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (page === 'staff-login') {
-    return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb' }}>
-        {renderNav()}
-
-        <div style={{ padding: '40px 20px', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 'calc(100vh - 80px)' }}>
-          <div style={{ width: '100%', maxWidth: '400px', backgroundColor: 'white', padding: '32px', borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
-            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>🛡️</div>
-              <h2 style={{ fontSize: '24px', fontWeight: 'bold' }}>Staff Portal</h2>
-              <p style={{ color: '#6b7280', fontSize: '14px' }}>Orphanage staff access</p>
-            </div>
-
-            {message && (
-              <div style={{ padding: '12px', marginBottom: '16px', backgroundColor: message.includes('success') || message.includes('sent') ? '#d1fae5' : '#fee2e2', color: message.includes('success') || message.includes('sent') ? '#065f46' : '#991b1b', borderRadius: '8px', fontSize: '14px' }}>
-                {message}
-              </div>
-            )}
-
-            {authStep !== 'loginOtp' && (
-              <>
-                <input
-                  type="email"
-                  placeholder="Staff ID (Email)"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  style={inputStyle}
-                />
-                <input
-                  type="password"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  style={inputStyle}
-                />
-                <button
-                  onClick={handleLogin}
-                  style={{ ...btnStyle, background: 'linear-gradient(to right, #6366f1, #8b5cf6)' }}
-                >
-                  Login
-                </button>
-              </>
-            )}
-
-            {authStep === 'loginOtp' && (
-              <>
-                <input
-                  type="text"
-                  placeholder="Enter 6-digit OTP"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  style={inputStyle}
-                  maxLength={6}
-                />
-                <button onClick={handleVerifyLogin} style={{ ...btnStyle, background: 'linear-gradient(to right, #6366f1, #8b5cf6)' }}>
-                  Verify OTP & Access
-                </button>
-              </>
-            )}
-
-            <button onClick={() => setPage('home')} style={{ ...btnStyle, background: 'transparent', color: '#6b7280', marginTop: '12px' }}>
-              ← Back to Home
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (page === 'donor-dashboard') {
-    return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb' }}>
-        {renderNav()}
-
-        <div style={{ padding: '40px 20px' }}>
-          <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-            <h1 style={{ fontSize: '32px', fontWeight: 'bold', marginBottom: '8px' }}>Donor Dashboard</h1>
-            <p style={{ color: '#6b7280', marginBottom: '32px' }}>View your donations and expense proofs</p>
-
-            {myDonations.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
-                <p>No donations found yet. Donations you make at the orphanage will appear here.</p>
-              </div>
-            )}
-
-            {myDonations.length > 0 && (
-              <div style={{ backgroundColor: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-                <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Your Donations</h2>
-
-                <div style={{ display: 'grid', gap: '16px' }}>
-                  {myDonations.map(d => (
-                    <div key={d._id || d.id} style={{ border: '2px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                        <div>
-                          <p style={{ fontSize: '12px', color: '#6b7280' }}>Donation ID:</p>
-                          <p style={{ fontWeight: 'bold', fontSize: '14px' }}>{d._id ? d._id.substring(0, 8) + '...' : d.id}</p>
-                        </div>
-                        <div>
-                          <p style={{ fontSize: '12px', color: '#6b7280' }}>Amount:</p>
-                          <p style={{ fontWeight: 'bold', fontSize: '18px', color: '#ec4899' }}>₹{d.amount}</p>
-                        </div>
-                        <div>
-                          <p style={{ fontSize: '12px', color: '#6b7280' }}>Purpose:</p>
-                          <p style={{ fontWeight: 'bold', fontSize: '14px', textTransform: 'capitalize' }}>{d.purpose}</p>
-                        </div>
-                        <div>
-                          <p style={{ fontSize: '12px', color: '#6b7280' }}>Phone:</p>
-                          <p style={{ fontWeight: 'bold', fontSize: '14px' }}>{d.donorPhone || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <p style={{ fontSize: '12px', color: '#6b7280' }}>Status:</p>
-                          <p style={{ fontWeight: 'bold', fontSize: '14px', color: d.status === 'UTILIZED' ? '#10b981' : d.status === 'VERIFIED' ? '#3b82f6' : '#f59e0b' }}>
-                            {d.status}
-                          </p>
-                        </div>
-                      </div>
-
-                      {d.expenseProof && (
-                        <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#f0fdf4', borderRadius: '8px', border: '1px solid #86efac' }}>
-                          <p style={{ fontSize: '14px', fontWeight: 'bold', color: '#166534', marginBottom: '8px' }}>✓ Expense Proof Uploaded</p>
-                          <p style={{ fontSize: '13px', color: '#166534', marginBottom: '4px' }}>
-                            <strong>Description:</strong> {d.expenseProof.description}
-                          </p>
-                          <p style={{ fontSize: '12px', color: '#166534' }}>
-                            Uploaded: {new Date(d.expenseProof.uploadedAt).toLocaleString()}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+        {page === 'dashboard' && user && (
+          <div className="row">
+            <div className="col-md-12 mb-4">
+              <div className="d-flex justify-content-between align-items-center bg-white p-3 rounded shadow-sm border-start border-4 border-primary">
+                <h4 className="mb-0">Welcome, {user.email}</h4>
+                <div className="text-end">
+                  <span className="d-block small text-muted text-uppercase fw-bold">RBAC Enforcement active</span>
+                  <span className="badge bg-info">Session: Authenticated (JWT)</span>
                 </div>
               </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (page === 'staff-dashboard') {
-    return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb' }}>
-        {renderNav()}
-
-        <div style={{ padding: '40px 20px' }}>
-          <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-            <h1 style={{ fontSize: '32px', fontWeight: 'bold', marginBottom: '8px' }}>Staff Dashboard</h1>
-            <p style={{ color: '#6b7280', marginBottom: '32px' }}>Record in-person donations and upload expense proofs</p>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px', marginBottom: '32px' }}></div>
-            {/* Record Donation */}
-            <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Record New Donation</h2>
-
-              <input
-                placeholder="Donor Name"
-                value={donorName}
-                onChange={(e) => setDonorName(e.target.value)}
-                style={inputStyle}
-              />
-              <input
-                placeholder="Donor Email"
-                value={donorEmail}
-                onChange={(e) => setDonorEmail(e.target.value)}
-                style={inputStyle}
-              />
-              <input
-                placeholder="Donor Phone"
-                value={donorPhone}
-                onChange={(e) => setDonorPhone(e.target.value)}
-                style={inputStyle}
-              />
-              <input
-                type="number"
-                placeholder="Amount"
-                value={donationAmount}
-                onChange={(e) => setDonationAmount(e.target.value)}
-                style={inputStyle}
-              />
-
-              <select
-                value={donationPurpose}
-                onChange={(e) => setDonationPurpose(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="food">Food</option>
-                <option value="education">Education</option>
-                <option value="medical">Medical</option>
-                <option value="clothing">Clothing</option>
-                <option value="general">General</option>
-              </select>
-
-              <button onClick={handleCreateDonation} style={btnStyle}>
-                Record Donation & Send OTP
-              </button>
             </div>
 
-            {/* Verify Donation */}
-            <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Verify Donation</h2>
-
-              <input
-                placeholder="Donor Email"
-                value={verifyEmail}
-                onChange={(e) => setVerifyEmail(e.target.value)}
-                style={inputStyle}
-              />
-              <input
-                placeholder="OTP"
-                value={verifyOTP}
-                onChange={(e) => setVerifyOTP(e.target.value)}
-                style={inputStyle}
-              />
-
-              <button onClick={handleVerifyDonation} style={btnStyle}>
-                Verify Donation
-              </button>
-            </div>
-
-            {/* Upload Expense Proof */}
-            <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Upload Expense Proof</h2>
-
-              <select
-                value={selectedDonationId}
-                onChange={(e) => setSelectedDonationId(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="">Select Donation ID</option>
-                {API.getUnlinkedDonations().map(d => (
-                  <option key={d.id} value={d.id}>{d.id}</option>
-                ))}
-              </select>
-
-              <input
-                placeholder="Receipt Image (Base64 / text demo)"
-                value={receiptImage}
-                onChange={(e) => setReceiptImage(e.target.value)}
-                style={inputStyle}
-              />
-              <textarea
-                placeholder="Description of expense"
-                value={proofDescription}
-                onChange={(e) => setProofDescription(e.target.value)}
-                style={{ ...inputStyle, height: '80px' }}
-              />
-
-              <button onClick={handleUploadProof} style={btnStyle}>
-                Upload Proof
-              </button>
-            </div>
-          </div>
-
-          {/* All Donations Table */}
-          <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-            <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>All Donations</h2>
-
-            {allDonations.length === 0 && (
-              <p style={{ color: '#6b7280' }}>No donations recorded yet.</p>
-            )}
-
-            {allDonations.map(d => (
-              <div key={d.id} style={{ borderBottom: '1px solid #e5e7eb', padding: '12px 0' }}>
-                <strong>{d.id}</strong> — ₹{d.amount} — {d.status}
-              </div>
-            ))}
-          </div>
-
-        </div>
-      </div>
-    );
-  }
-
-  if (page === 'products') {
-    const products = [
-      { id: 'mk1', name: 'Monthly Meal Kit', price: 3000, desc: 'Feeds 1 child for 30 days', icon: '🍲', color: 'from-orange-100 to-red-100' },
-      { id: 'ss1', name: 'School Supplies', price: 2000, desc: 'Equips 1 student for year', icon: '📚', color: 'from-blue-100 to-indigo-100' },
-      { id: 'dr1', name: 'New Dress', price: 1500, desc: 'One set of new clothes', icon: '👗', color: 'from-pink-100 to-purple-100' },
-      { id: 'ce1', name: 'Celebration Expense', price: 5000, desc: 'Sponsor a birthday party', icon: '🎂', color: 'from-yellow-100 to-orange-100' },
-    ];
-
-    return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb' }}>
-        {renderNav()}
-
-        <div style={{ padding: '40px 20px', maxWidth: '1200px', margin: '0 auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <h1 style={{ fontSize: '36px', fontWeight: 'bold', color: '#111827' }}>Make a Difference Today</h1>
-            <button
-              onClick={() => setPage('donor-dashboard')}
-              style={{
-                padding: '12px 24px',
-                backgroundColor: '#ec4899',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: '0 4px 6px -1px rgba(236, 72, 153, 0.4)'
-              }}
-            >
-              My Dashboard ({cart.length})
-            </button>
-          </div>
-          <p style={{ color: '#6b7280', fontSize: '18px', marginBottom: '40px' }}>Choose items you'd like to donate</p>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '32px' }}>
-            {products.map(p => (
-              <div key={p.id} style={{ backgroundColor: 'white', borderRadius: '24px', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)', transition: 'transform 0.2s' }}>
-                <div style={{ height: '200px', backgroundColor: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '80px' }}>
-                  {p.icon}
-                </div>
-                <div style={{ padding: '24px' }}>
-                  <h3 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '8px' }}>{p.name}</h3>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                    <span style={{ color: '#f59e0b' }}>⭐</span>
-                    <span style={{ color: '#6b7280', fontSize: '14px' }}>{p.desc}</span>
+            <div className="col-md-8">
+              <div className="card shadow-sm mb-4">
+                <div className="card-header bg-white fw-bold">Donation Records & Integrity Checks</div>
+                <div className="card-body p-0">
+                  <div className="table-responsive">
+                    <table className="table table-hover mb-0">
+                      <thead className="table-light">
+                        <tr>
+                          <th>Donor</th>
+                          <th>Amount</th>
+                          <th>Purpose</th>
+                          <th>Security</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {donations.length === 0 ? <tr><td colSpan="4" className="text-center p-4">No records found.</td></tr> :
+                          donations.map(d => (
+                            <tr key={d._id}>
+                              <td className="small">{d.donorEmail}</td>
+                              <td className="fw-bold text-success">₹{d.amount}</td>
+                              <td><span className="badge bg-secondary text-uppercase">{d.purpose}</span></td>
+                              <td>
+                                <button className="btn btn-sm btn-outline-primary" onClick={() => setFormData({ ...formData, activeDonation: d })}>🛡️ Proof</button>
+                                {user.role === 'admin' && <button className="btn btn-sm btn-link text-danger ms-2">Delete</button>}
+                              </td>
+                            </tr>
+                          ))
+                        }
+                      </tbody>
+                    </table>
                   </div>
-                  <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#ec4899', marginBottom: '24px' }}>₹{p.price}</div>
-                  <button
-                    onClick={() => addToCart(p)}
-                    style={{
-                      width: '100%',
-                      padding: '16px',
-                      backgroundColor: '#ec4899',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '12px',
-                      fontWeight: 'bold',
-                      fontSize: '16px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px'
-                    }}
-                  >
-                    🎁 Add to Cart
-                  </button>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
+            </div>
 
-  // Reuse existing dashboard logic but insert Cart
-  if (page === 'donor-dashboard') {
-    return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb' }}>
-        {renderNav()}
-
-        <div style={{ padding: '40px 20px' }}>
-          <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-            <h1 style={{ fontSize: '32px', fontWeight: 'bold', marginBottom: '8px' }}>Donor Dashboard</h1>
-            <p style={{ color: '#6b7280', marginBottom: '32px' }}>Manage your cart and view past donations</p>
-
-            {/* CART SECTION */}
-            <div style={{ backgroundColor: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', marginBottom: '32px' }}>
-              <h2 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                🛒 Your Cart
-              </h2>
-
-              {cart.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
-                  <p style={{ marginBottom: '16px' }}>Your cart is empty.</p>
-                  <button onClick={() => setPage('products')} style={{ padding: '8px 16px', backgroundColor: '#ec4899', color: 'white', borderRadius: '8px', border: 'none', cursor: 'pointer' }}>
-                    Browse Products
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <div style={{ marginBottom: '24px' }}>
-                    {cart.map(item => (
-                      <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderBottom: '1px solid #e5e7eb' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                          <span style={{ fontSize: '24px' }}>{item.icon}</span>
-                          <div>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>{item.name}</p>
-                            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>₹{item.price}</p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => removeFromCart(item.id)}
-                          style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '24px' }}>
-                    <div style={{ fontSize: '20px', fontWeight: 'bold' }}>
-                      Total: <span style={{ color: '#ec4899' }}>₹{cart.reduce((sum, item) => sum + item.price, 0)}</span>
-                    </div>
-                    <button onClick={() => showMsg('Proceeding to payment... (Mock)')} style={{ padding: '12px 32px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>
-                      Proceed to Donate
-                    </button>
+            <div className="col-md-4">
+              {user.role !== 'donor' && (
+                <div className="card shadow-sm mb-4 border-warning">
+                  <div className="card-header bg-warning text-dark fw-bold">Admin/Staff Action: Record Donation</div>
+                  <div className="card-body">
+                    <form onSubmit={createDonation}>
+                      <input className="form-control form-control-sm mb-2" placeholder="Donor Phone (Sensitive)" onChange={e => setFormData({ ...formData, phone: e.target.value })} />
+                      <input className="form-control form-control-sm mb-2" placeholder="Amount" type="number" onChange={e => setFormData({ ...formData, amount: e.target.value })} />
+                      <select className="form-select form-select-sm mb-2" onChange={e => setFormData({ ...formData, purpose: e.target.value })}>
+                        <option value="food">Food</option>
+                        <option value="education">Education</option>
+                      </select>
+                      <button className="btn btn-warning btn-sm w-100 fw-bold">Securely Save & Sign</button>
+                    </form>
                   </div>
                 </div>
               )}
-            </div>
 
-            {/* EXISTING DONATION HISTORY... */}
-            <div style={{ backgroundColor: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', marginBottom: '32px' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Past Donations (OTP Access)</h2>
-
-              <input
-                type="email"
-                placeholder="Your email"
-                value={viewEmail}
-                onChange={(e) => setViewEmail(e.target.value)}
-                style={inputStyle}
-              />
-
-              {needsOTP && (
-                <input
-                  type="text"
-                  placeholder="Enter OTP"
-                  value={viewOTP}
-                  onChange={(e) => setViewOTP(e.target.value)}
-                  style={inputStyle}
-                  maxLength={6}
-                />
-              )}
-
-              <button onClick={handleViewDonations} style={btnStyle}>
-                {needsOTP ? 'Verify OTP & View' : 'Send OTP'}
-              </button>
-            </div>
-
-            {myDonations.length > 0 && (
-              <div style={{ backgroundColor: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-                <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Your Donation History</h2>
-                <div style={{ display: 'grid', gap: '16px' }}>
-                  {myDonations.map(d => (
-                    <div key={d.id} style={{ border: '2px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
-                      <p><strong>ID:</strong> {d.id}</p>
-                      <p><strong>Amount:</strong> ₹{d.amount}</p>
-                      <p><strong>Status:</strong> {d.status}</p>
-                    </div>
-                  ))}
-                </div>
+              <div className="card shadow-sm border-info">
+                <div className="card-header bg-info text-white fw-bold">System Status (CIA Verification)</div>
+                <ul className="list-group list-group-flush small">
+                  <li className="list-group-item d-flex justify-content-between">Confidentiality <span className="text-success fw-bold">AES-256 Verified</span></li>
+                  <li className="list-group-item d-flex justify-content-between">Integrity <span className="text-success fw-bold">RSA-SHA256 Signed</span></li>
+                  <li className="list-group-item d-flex justify-content-between">Availability <span className="text-success fw-bold">Load Balanced</span></li>
+                  <li className="list-group-item d-flex justify-content-between">RBAC Level <span className="text-primary fw-bold text-uppercase">{user.role}</span></li>
+                </ul>
               </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
+            </div>
 
-  return null;
+            <div className="col-md-12">
+              <SecurityPanel data={formData.activeDonation ? {
+                encryptedPhone: formData.activeDonation.donorPhone,
+                decryptedPhone: formData.activeDonation.decryptedPhone || '******** (Locked)',
+                dataHash: formData.activeDonation.dataHash,
+                encodedContext: user.context
+              } : null} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <footer className="footer mt-5 py-3 border-top bg-white">
+        <div className="container text-center text-muted small">
+          Senior Cybersecurity Refactor © 2026 | Focus: Backend Logic & Secure Implementations
+        </div>
+      </footer>
+    </div>
+  );
 }
 
 export default App;

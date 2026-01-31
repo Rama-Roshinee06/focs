@@ -1,18 +1,15 @@
 const PERMISSIONS = {
-  // 3 SUBJECTS: admin, donor, orphanage (staff)
-  // 3 OBJECTS: donation, profile, expense_proof
-
   admin: {
     donation: ['create', 'read', 'update', 'delete'],
     profile: ['read', 'update', 'delete'],
     expense_proof: ['create', 'read', 'update', 'delete']
   },
   donor: {
-    donation: ['create', 'read_own'], // 'read_own' is a custom action handled by logic
+    donation: ['create', 'read_own'],
     profile: ['read_own', 'update_own'],
     expense_proof: ['read']
   },
-  staff: { // "orphanage" implicit role
+  staff: {
     donation: ['read'],
     profile: ['read_own'],
     expense_proof: ['create', 'read', 'update']
@@ -21,9 +18,9 @@ const PERMISSIONS = {
 
 /**
  * ACL Middleware
- * @param {Array<string>} allowedRoles - List of roles that can access this route (Coarse-grained)
- * @param {string} resource - The resource being accessed (Fine-grained)
- * @param {string} action - The action being performed (Fine-grained)
+ * @param {Array<string>} allowedRoles - List of roles that can access this route
+ * @param {string} resource - The resource being accessed
+ * @param {string} action - The action being performed
  */
 module.exports = (allowedRoles, resource = null, action = null) => {
   return (req, res, next) => {
@@ -31,18 +28,25 @@ module.exports = (allowedRoles, resource = null, action = null) => {
 
     // 1. Coarse-grained Role Check
     if (!allowedRoles.includes(userRole)) {
-      return res.status(403).json({ message: "Access Forbidden: Insufficient Role" });
+      const rolesString = allowedRoles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(" or ");
+      return res.status(403).json({
+        message: `Access Denied: ${rolesString} Only`,
+        error: "RBAC_REJECTION"
+      });
     }
 
-    // 2. Fine-grained Permission Check (if resource/action provided)
+    // 2. Fine-grained Permission Check
     if (resource && action) {
       const rolePermissions = PERMISSIONS[userRole];
       if (!rolePermissions || !rolePermissions[resource] || !rolePermissions[resource].includes(action)) {
-        // Handle special "own" cases if needed, but for now strict block
-        return res.status(403).json({ message: `Access Forbidden: Cannot ${action} ${resource}` });
+        return res.status(403).json({
+          message: `Access Denied: Insufficient permissions to ${action} ${resource}`,
+          error: "PERMISSION_REJECTION"
+        });
       }
     }
 
     next();
   };
 };
+

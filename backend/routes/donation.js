@@ -64,11 +64,12 @@ router.get("/my-donations", auth, async (req, res) => {
       return {
         ...d,
         expenseProof: proof,
-        donorPhone: d.donorPhone ? decrypt(d.donorPhone) : d.donorPhone
+        decryptedPhone: d.donorPhone ? decrypt(d.donorPhone) : d.donorPhone,
+        encryptedPhone: d.donorPhone // Keep the original encrypted version for demo
       };
     });
 
-    res.json(result);
+    res.json({ donations: result });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
