@@ -189,26 +189,46 @@ function App() {
               <div className="col-md-4">
                 <div className="card h-100 border-0 shadow-sm p-4">
                   <div className="fs-1 mb-3">🛡️</div>
-                  <h4>Secure RBAC</h4>
-                  <p className="small text-muted">Role-Based Access Control ensures data is only handled by authorized staff and donors.</p>
+                  <h4>Verified Access</h4>
+                  <p className="small text-muted">Role-based controls ensure history and data are only accessible by the right individuals.</p>
                 </div>
               </div>
               <div className="col-md-4">
                 <div className="card h-100 border-0 shadow-sm p-4">
                   <div className="fs-1 mb-3">📲</div>
-                  <h4>MFA Protected</h4>
-                  <p className="small text-muted">Two-factor authentication (OTP) prevents unauthorized access to your donation history.</p>
+                  <h4>Safe Login</h4>
+                  <p className="small text-muted">Two-step verification ensures that only you can access your personal contribution records.</p>
                 </div>
               </div>
               <div className="col-md-4">
                 <div className="card h-100 border-0 shadow-sm p-4">
                   <div className="fs-1 mb-3">✍️</div>
-                  <h4>Digital Signatures</h4>
-                  <p className="small text-muted">Every transaction is digitally signed (RSA-SHA256) to guarantee data integrity.</p>
+                  <h4>Payment Proof</h4>
+                  <p className="small text-muted">Every record is digitally verified to ensure the information remains accurate and unchanged.</p>
                 </div>
               </div>
             </div>
-            {!user && <button className="btn btn-primary btn-lg mt-5 px-5 shadow" onClick={() => setPage('login')}>Start Donating Now</button>}
+            {!user && (
+              <div className="mt-5">
+                <button className="btn btn-primary btn-lg px-5 shadow me-3" onClick={() => setPage('login')}>Start Donating Now</button>
+                <div className="mt-4 p-4 bg-white rounded-4 shadow-sm border">
+                  <h5 className="fw-bold mb-3">Quick Demo Roles (For Testing)</h5>
+                  <div className="d-flex justify-content-center gap-3">
+                    <button className="btn btn-outline-info" onClick={() => {
+                      setFormData({ ...formData, email: 'staff@hopehaven.org', password: 'password123' });
+                      setAuthMode('login');
+                      setPage('login');
+                    }}>Login as Staff</button>
+                    <button className="btn btn-outline-success" onClick={() => {
+                      setFormData({ ...formData, email: 'donor@example.com', password: 'password123' });
+                      setAuthMode('login');
+                      setPage('login');
+                    }}>Login as Donor</button>
+                  </div>
+                  <p className="small text-muted mt-2">Roles are pre-configured with sample data for exploration.</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -220,7 +240,7 @@ function App() {
                   <div className="text-center mb-4">
                     <div className="fs-1 mb-2">🔐</div>
                     <h2 className="fw-bold">{authMode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
-                    <p className="text-muted small">Multi-Factor Authentication (OTP) is enabled</p>
+                    <p className="text-muted small">Safe Access (Two-step verification) is enabled</p>
                   </div>
                   <form onSubmit={handleAuth}>
                     {authStep === 1 && (
@@ -235,11 +255,10 @@ function App() {
                         </div>
                         {authMode === 'signup' && (
                           <div className="mb-3">
-                            <label className="form-label small fw-bold text-muted">ROLE (FOR DEMO)</label>
+                            <label className="form-label small fw-bold text-muted">ACCOUNT TYPE</label>
                             <select className="form-select bg-light border-0" value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value })}>
-                              <option value="donor">Donor</option>
-                              <option value="staff">Staff</option>
-                              <option value="admin">Admin</option>
+                              <option value="donor">Donor (Support Orphans)</option>
+                              <option value="staff">Staff (Manage Records)</option>
                             </select>
                           </div>
                         )}
@@ -320,10 +339,10 @@ function App() {
                         <h3 className="mb-0 text-primary fw-bold">₹{cart.reduce((s, i) => s + i.price, 0)}</h3>
                       </div>
                       <div className="mb-3">
-                        <label className="form-label small fw-bold">YOUR PHONE (FOR SECURE ENCRYPTION)</label>
+                        <label className="form-label small fw-bold">YOUR PHONE (FOR RECORD VERIFICATION)</label>
                         <input className="form-control" type="text" placeholder="+91 XXXX XXXX" value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} />
                       </div>
-                      <button className="btn btn-primary w-100 py-3 fw-bold shadow" onClick={processCartDonation}>Securely Record Donation</button>
+                      <button className="btn btn-primary w-100 py-3 fw-bold shadow" onClick={processCartDonation}>Confirm & Record Donation</button>
                     </div>
                   </>
                 )}
@@ -338,10 +357,10 @@ function App() {
               <div className="d-flex justify-content-between align-items-center bg-white p-4 rounded-4 shadow-sm border-start border-5 border-primary">
                 <div>
                   <h3 className="mb-1 fw-bold">Hello, {user.email.split('@')[0]}!</h3>
-                  <p className="text-muted mb-0"><span className="badge bg-light text-dark border me-2">ROLE: {user.role.toUpperCase()}</span> Managed via RBAC (Access Control List)</p>
+                  <p className="text-muted mb-0"><span className="badge bg-light text-dark border me-2">ACCOUNT TYPE: {user.role.toUpperCase()}</span> Managed via Verified Permissions</p>
                 </div>
                 <div className="text-end d-none d-md-block">
-                  <span className="badge bg-success-subtle text-success border border-success px-3 py-2 rounded-pill">MFA VERIFIED SESSION</span>
+                  <span className="badge bg-success-subtle text-success border border-success px-3 py-2 rounded-pill">VERIFIED SESSION</span>
                 </div>
               </div>
             </div>
@@ -350,7 +369,7 @@ function App() {
               <div className="row">
                 <div className="col-md-8">
                   <div className="card shadow-sm border-0 rounded-4 mb-4 overflow-hidden">
-                    <div className="card-header bg-white py-3 fw-bold border-0">Donation Records (Transaction Integrity)</div>
+                    <div className="card-header bg-white py-3 fw-bold border-0">Donation Records (Verified Ledger)</div>
                     <div className="table-responsive">
                       <table className="table table-hover align-middle mb-0">
                         <thead className="table-light">
@@ -359,7 +378,7 @@ function App() {
                             <th>Amount</th>
                             <th>Purpose</th>
                             <th>Status</th>
-                            <th>Security</th>
+                            <th>Verification</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -391,7 +410,7 @@ function App() {
                             <input className="form-control form-control-sm border-0" placeholder="Donor email" onChange={e => setFormData({ ...formData, emailRecord: e.target.value })} />
                           </div>
                           <div className="mb-2">
-                            <input className="form-control form-control-sm border-0" placeholder="Donor Phone (Encrypted)" onChange={e => setFormData({ ...formData, phone: e.target.value })} />
+                            <input className="form-control form-control-sm border-0" placeholder="Donor Phone (Verified)" onChange={e => setFormData({ ...formData, phone: e.target.value })} />
                           </div>
                           <div className="mb-2">
                             <input className="form-control form-control-sm border-0" placeholder="Amount" type="number" onChange={e => setFormData({ ...formData, amount: e.target.value })} />
@@ -399,24 +418,24 @@ function App() {
                           <div className="mb-3">
                             <input className="form-control form-control-sm border-0" placeholder="Purpose" onChange={e => setFormData({ ...formData, purpose: e.target.value })} />
                           </div>
-                          <button className="btn btn-warning btn-sm w-100 fw-bold shadow-sm">Save & Sign Encrypted</button>
+                          <button className="btn btn-warning btn-sm w-100 fw-bold shadow-sm">Save & Verify Entry</button>
                         </form>
                       </div>
                     </div>
                   )}
                   <div className="card shadow-sm border-0 rounded-4 p-4 mb-4">
-                    <h5 className="fw-bold mb-3">CIA Triad Status</h5>
+                    <h5 className="fw-bold mb-3">System Trust Status</h5>
                     <div className="d-flex align-items-center mb-3">
                       <div className="p-2 bg-success-subtle text-success rounded-circle me-3">🔒</div>
-                      <div className="small"><strong>Confidentiality:</strong> AES-256 for PII data Active.</div>
+                      <div className="small"><strong>Privacy:</strong> Data protection is active for donor information.</div>
                     </div>
                     <div className="d-flex align-items-center mb-3">
                       <div className="p-2 bg-primary-subtle text-primary rounded-circle me-3">✍️</div>
-                      <div className="small"><strong>Integrity:</strong> RSA-SHA256 Signatures Active.</div>
+                      <div className="small"><strong>Accuracy:</strong> Record verification is active to prevent changes.</div>
                     </div>
                     <div className="d-flex align-items-center">
                       <div className="p-2 bg-info-subtle text-info rounded-circle me-3">🌐</div>
-                      <div className="small"><strong>Availability:</strong> Secure Multi-Role Access Active.</div>
+                      <div className="small"><strong>Reliability:</strong> Multi-user access control is active.</div>
                     </div>
                   </div>
                 </div>
